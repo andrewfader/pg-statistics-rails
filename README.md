@@ -13,7 +13,8 @@ PostgreSQL extended statistics let the query planner estimate how columns and ex
 
 - `create_statistics` and `drop_statistics` migration helpers (reversible via `CommandRecorder`)
 - `connection.statistics(table_name)` introspection reading `pg_statistic_ext`
-- Automatic `create_statistics` dumping in `db/schema.rb` after each table's `create_table` block
+- Statistics targets (`SET STATISTICS`) on statistics objects, columns, and expression index columns
+- Automatic dumping of all of it in `db/schema.rb` after each table's `create_table` block
 
 ## Installation
 
@@ -51,6 +52,27 @@ Options:
 - `:name` — Custom statistics object name. Defaults to `stat_rails_<10-char sha256>`. When the table name is schema-qualified and `:name` is not, the statistics object is created in the table's schema.
 - `:kinds` — Array of kinds to build (`:ndistinct`, `:dependencies`, `:mcv`). Defaults to all kinds.
 - `:if_not_exists` — Emits `CREATE STATISTICS IF NOT EXISTS`.
+- `:target` — The object's statistics target (`ALTER STATISTICS ... SET STATISTICS`). Defaults to `default_statistics_target`.
+
+### Statistics targets
+
+A statistics target sets how much `ANALYZE` samples. Raise it for a column, or an expression index's column, whose estimates are off:
+
+```ruby
+set_column_statistics_target :addresses, :city, 1000
+set_index_statistics_target "index_addresses_on_lower_city", 1, 1000 # column by position
+
+# nil restores default_statistics_target
+set_column_statistics_target :addresses, :city, nil
+```
+
+These are not reversible, since the previous target is not recorded; use `up`/`down`. Explicit targets are dumped after the table:
+
+```ruby
+create_statistics "addresses", ["city", "zip_code"], name: "addresses_city_zip_code_stat", target: 900
+set_column_statistics_target "addresses", "city", 1000
+set_index_statistics_target "index_addresses_on_lower_city", 1, 1000
+```
 
 ### Dropping statistics
 
@@ -73,7 +95,13 @@ ActiveRecord::Base.lease_connection.statistics(:addresses)
 #      table_name="addresses",
 #      name="addresses_city_zip_code_stat",
 #      columns=["city", "zip_code"],
-#      kinds=[:dependencies]>]
+#      kinds=[:dependencies],
+#      target=nil>]
+
+ActiveRecord::Base.lease_connection.statistics_targets(:addresses)
+# => #<struct PgStatisticsRails::StatisticsTargets
+#      columns={"city"=>1000},
+#      indexes=[["index_addresses_on_lower_city", 1, 1000]]>
 ```
 
 ## License
