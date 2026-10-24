@@ -9,4 +9,10 @@ Rake::TestTask.new(:test) do |t|
   t.test_files = FileList["test/**/*_test.rb"]
 end
 
+desc "Run tests with coverage"
+task :coverage do
+  ENV["COVERAGE"] = "true"
+  Rake::Task[:test].invoke
+end
+
 task default: :test

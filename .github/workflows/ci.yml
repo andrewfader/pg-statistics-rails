@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pg_statistics_rails_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: pg_statistics_rails_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+
+      - name: Run tests with coverage
+        run: bundle exec rake coverage
+        env:
+          COVERAGE: "true"
+
+      - name: Summarize coverage
+        if: always() && hashFiles('coverage/coverage.json') != ''
+        run: |
+          ruby -rjson -e '
+            data = JSON.parse(File.read("coverage/coverage.json"))
+            line = data.dig("total", "lines", "percent") || data.dig("metrics", "covered_percent")
+            branch = data.dig("total", "branches", "percent") || data.dig("metrics", "branch_covered_percent")
+            summary = ["### Test Coverage", ""]
+            summary << "- **Line coverage:** #{format("%.2f%%", line)}" if line
+            summary << "- **Branch coverage:** #{format("%.2f%%", branch)}" if branch
+            File.open(ENV.fetch("GITHUB_STEP_SUMMARY"), "a") { |f| f.puts(summary.join("\n")) }
+          '
+
+      - name: Build gem
+        run: bundle exec rake build
+
+      - name: Upload built gem
+        uses: actions/upload-artifact@v4
+        with:
+          name: pg-statistics-rails-gem
+          path: pkg/*.gem
+          if-no-files-found: error
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          if-no-files-found: ignore
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage/coverage.json
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false

@@ -1,5 +1,10 @@
 # pg-statistics-rails
 
+[![CI](https://github.com/andrewfader/pg-statistics-rails/actions/workflows/ci.yml/badge.svg)](https://github.com/andrewfader/pg-statistics-rails/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/andrewfader/pg-statistics-rails/graph/badge.svg)](https://codecov.io/gh/andrewfader/pg-statistics-rails)
+[![Gem Version](https://badge.fury.io/rb/pg-statistics-rails.svg)](https://rubygems.org/gems/pg-statistics-rails)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.txt)
+
 PostgreSQL extended statistics (`CREATE STATISTICS`) support for Active Record migrations and `db/schema.rb`.
 
 PostgreSQL extended statistics let the query planner estimate how columns and expressions depend on each other, fixing row estimates where the column-independence assumption breaks down. Without schema dumper support, statistics created via `execute` only exist in databases that ran that migration — any database built via `db:schema:load` (test databases, CI, fresh environments) plans queries without them.

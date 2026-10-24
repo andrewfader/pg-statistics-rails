@@ -1,5 +1,17 @@
 # frozen_string_literal: true
 
+if ENV["COVERAGE"]
+  require "simplecov"
+
+  SimpleCov.start do
+    respond_to?(:skip) ? skip("/test/") : add_filter("/test/")
+    enable_coverage :branch
+    formatters = [SimpleCov::Formatter::HTMLFormatter]
+    formatters << SimpleCov::Formatter::JSONFormatter if defined?(SimpleCov::Formatter::JSONFormatter)
+    formatter SimpleCov::Formatter::MultiFormatter.new(formatters)
+  end
+end
+
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 
 require "minitest/autorun"

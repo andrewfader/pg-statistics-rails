@@ -7,3 +7,4 @@ gemspec
 gem "pg"
 gem "minitest"
 gem "rake"
+gem "simplecov", require: false

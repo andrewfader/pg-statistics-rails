@@ -1,5 +1,6 @@
 /*.gem
 /pkg/
+/coverage/
 /.bundle/
 /vendor/bundle
 /Gemfile.lock
