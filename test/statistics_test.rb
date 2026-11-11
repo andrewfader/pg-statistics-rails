@@ -79,6 +79,49 @@ class PostgresqlStatisticsTest < Minitest::Test
     assert_equal 1, @connection.statistics("addresses").size
   end
 
+  def test_create_statistics_builds_the_new_statistics
+    insert_addresses
+    @connection.create_statistics :addresses, [:city, :zip_code], name: "addresses_city_zip_code_stat"
+
+    assert built?("addresses_city_zip_code_stat")
+  end
+
+  def test_create_statistics_analyzes_only_the_columns_of_the_statistics
+    insert_addresses
+    @connection.create_statistics :addresses, [:city, :zip_code], name: "addresses_city_zip_code_stat"
+
+    assert_equal ["city", "zip_code"], analyzed_columns
+  end
+
+  def test_create_statistics_on_an_expression_builds_the_new_statistics
+    skip unless @connection.database_version >= 14_00_00
+
+    insert_addresses
+    @connection.create_statistics :addresses, [:city, "lower(email)"], name: "addresses_city_lower_email_stat"
+
+    assert built?("addresses_city_lower_email_stat")
+    assert_equal ["city", "email", "id", "zip_code"], analyzed_columns
+  end
+
+  def test_create_statistics_keeps_the_other_statistics_on_the_table_built
+    insert_addresses
+    @connection.create_statistics :addresses, [:city, :zip_code], name: "addresses_city_zip_code_stat", analyze: false
+    notices = collect_notices do
+      @connection.create_statistics :addresses, [:city, :email], name: "addresses_city_email_stat"
+    end
+
+    assert_empty notices
+    assert built?("addresses_city_zip_code_stat")
+    assert built?("addresses_city_email_stat")
+  end
+
+  def test_create_statistics_without_analyze
+    insert_addresses
+    @connection.create_statistics :addresses, [:city, :zip_code], name: "addresses_city_zip_code_stat", analyze: false
+
+    refute built?("addresses_city_zip_code_stat")
+  end
+
   def test_drop_statistics
     @connection.create_statistics :addresses, [:city, :zip_code], name: "addresses_city_zip_code_stat"
     @connection.drop_statistics :addresses, name: "addresses_city_zip_code_stat"
@@ -163,6 +206,40 @@ class PostgresqlStatisticsTest < Minitest::Test
   end
 
   private
+    def insert_addresses
+      @connection.execute <<~SQL
+        INSERT INTO addresses (city, zip_code, email)
+        SELECT 'city' || i % 10, 'zip' || i % 50, 'user' || i || '@example.com'
+        FROM generate_series(1, 1000) i
+      SQL
+    end
+
+    def built?(name)
+      @connection.select_value(<<~SQL)
+        SELECT EXISTS (
+          SELECT 1 FROM pg_statistic_ext_data d JOIN pg_statistic_ext s ON s.oid = d.stxoid
+          WHERE s.stxname = #{@connection.quote(name)}
+        )
+      SQL
+    end
+
+    def analyzed_columns
+      @connection.select_values(<<~SQL)
+        SELECT attname FROM pg_stats
+        WHERE schemaname = current_schema() AND tablename = 'addresses'
+        ORDER BY attname
+      SQL
+    end
+
+    def collect_notices
+      notices = []
+      previous = @connection.raw_connection.set_notice_receiver { |result| notices << result.error_message }
+      yield
+      notices
+    ensure
+      @connection.raw_connection.set_notice_receiver(&previous)
+    end
+
     def dump_table_schema(*tables)
       old_ignore_tables = ActiveRecord::SchemaDumper.ignore_tables
       ActiveRecord::SchemaDumper.ignore_tables = @connection.data_sources - tables

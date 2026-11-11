@@ -4,6 +4,29 @@ require "test_helper"
 require "stringio"
 
 class PostgresqlStatisticsTargetsTest < Minitest::Test
+  class SilentMigration < ActiveRecord::Migration::Current
+    def write(*); end
+  end
+
+  class SetStatisticsTargetsMigration < SilentMigration
+    def change
+      set_column_statistics_target :addresses, :city, from: 300, to: 700
+      set_index_statistics_target "index_addresses_on_lower_city", 1, from: nil, to: 800
+    end
+  end
+
+  class SetColumnStatisticsTargetMigration < SilentMigration
+    def change
+      set_column_statistics_target :addresses, :city, 700
+    end
+  end
+
+  class SetIndexStatisticsTargetMigration < SilentMigration
+    def change
+      set_index_statistics_target "index_addresses_on_lower_city", 1, 800
+    end
+  end
+
   def setup
     @connection = ActiveRecord::Base.lease_connection
     @connection.create_table :addresses, force: true do |t|
@@ -42,6 +65,37 @@ class PostgresqlStatisticsTargetsTest < Minitest::Test
     @connection.set_column_statistics_target :addresses, :city, nil
     @connection.set_index_statistics_target "index_addresses_on_lower_city", 1, nil
     assert_predicate @connection.statistics_targets("addresses"), :empty?
+  end
+
+  def test_statistics_targets_are_reversible_given_the_previous_targets
+    @connection.set_column_statistics_target :addresses, :city, 300
+
+    migration = SetStatisticsTargetsMigration.new
+    migration.migrate(:up)
+    targets = @connection.statistics_targets("addresses")
+    assert_equal({ "city" => 700 }, targets.columns)
+    assert_equal [["index_addresses_on_lower_city", 1, 800]], targets.indexes
+
+    migration.migrate(:down)
+    targets = @connection.statistics_targets("addresses")
+    assert_equal({ "city" => 300 }, targets.columns)
+    assert_empty targets.indexes
+  end
+
+  def test_column_statistics_target_without_the_previous_target_is_irreversible
+    migration = SetColumnStatisticsTargetMigration.new
+    migration.migrate(:up)
+
+    assert_raises(ActiveRecord::IrreversibleMigration) { migration.migrate(:down) }
+    assert_equal({ "city" => 700 }, @connection.statistics_targets("addresses").columns)
+  end
+
+  def test_index_statistics_target_without_the_previous_target_is_irreversible
+    migration = SetIndexStatisticsTargetMigration.new
+    migration.migrate(:up)
+
+    assert_raises(ActiveRecord::IrreversibleMigration) { migration.migrate(:down) }
+    assert_equal [["index_addresses_on_lower_city", 1, 800]], @connection.statistics_targets("addresses").indexes
   end
 
   def test_schema_dump_writes_targets_after_the_table
