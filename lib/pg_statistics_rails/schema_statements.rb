@@ -47,7 +47,12 @@ module PgStatisticsRails
     # :   The object's statistics target (`ALTER STATISTICS ... SET STATISTICS`).
     #     Defaults to the server's `default_statistics_target`.
     #
-    # Statistics are built by the next `ANALYZE` of the table.
+    # `:analyze`
+    # :   Set to `false` to leave building the statistics to the next `ANALYZE`
+    #     of the table. Defaults to `true`.
+    #
+    # Statistics are built by an `ANALYZE` of the table straight after, so the
+    # planner can use them before autovacuum next analyzes the table.
     def create_statistics(table_name, columns, **options)
       name = statistics_name(table_name, columns: columns, **options)
       kinds = Array(options[:kinds])
@@ -60,6 +65,7 @@ module PgStatisticsRails
 
       execute sql
       execute "ALTER STATISTICS #{quote_table_name(name)} SET STATISTICS #{Integer(options[:target])}" unless options[:target].nil?
+      analyze_statistics(table_name) unless options[:analyze] == false
     end
 
     # Sets a column's statistics target, how much `ANALYZE` samples it. A nil
@@ -68,8 +74,14 @@ module PgStatisticsRails
     # ```
     # set_column_statistics_target :addresses, :city, 1000
     # ```
-    def set_column_statistics_target(table_name, column_name, target)
-      execute "ALTER TABLE #{quote_table_name(table_name)} ALTER COLUMN #{quote_column_name(column_name)} SET STATISTICS #{statistics_target_value(target)}"
+    #
+    # Passing the previous target as `:from` makes it reversible in `change`:
+    #
+    # ```
+    # set_column_statistics_target :addresses, :city, from: nil, to: 1000
+    # ```
+    def set_column_statistics_target(table_name, column_name, target_or_changes)
+      execute "ALTER TABLE #{quote_table_name(table_name)} ALTER COLUMN #{quote_column_name(column_name)} SET STATISTICS #{statistics_target_value(target_or_changes)}"
     end
 
     # Sets the statistics target of an expression index's column, by position
@@ -78,8 +90,10 @@ module PgStatisticsRails
     # ```
     # set_index_statistics_target "index_addresses_on_lower_city", 1, 1000
     # ```
-    def set_index_statistics_target(index_name, column_number, target)
-      execute "ALTER INDEX #{quote_table_name(index_name)} ALTER COLUMN #{Integer(column_number)} SET STATISTICS #{statistics_target_value(target)}"
+    #
+    # Like `set_column_statistics_target`, it takes `from:` and `to:`.
+    def set_index_statistics_target(index_name, column_number, target_or_changes)
+      execute "ALTER INDEX #{quote_table_name(index_name)} ALTER COLUMN #{Integer(column_number)} SET STATISTICS #{statistics_target_value(target_or_changes)}"
     end
 
     # Returns the explicit statistics targets on the given table's columns and
@@ -202,7 +216,16 @@ module PgStatisticsRails
         end
       end
 
-      def statistics_target_value(target)
+      def analyze_statistics(table_name)
+        columns = statistics(table_name).flat_map(&:columns).uniq
+        sql = +"ANALYZE #{quote_table_name(table_name)}"
+        sql << " (#{columns.map { |column| quote_column_name(column) }.join(', ')})" if columns.all? { |column| column.match?(/\A\w+\z/) }
+
+        execute sql
+      end
+
+      def statistics_target_value(target_or_changes)
+        target = target_or_changes.is_a?(Hash) && target_or_changes.key?(:from) && target_or_changes.key?(:to) ? target_or_changes[:to] : target_or_changes
         target.nil? ? -1 : Integer(target)
       end
 

@@ -53,6 +53,7 @@ Options:
 - `:kinds` — Array of kinds to build (`:ndistinct`, `:dependencies`, `:mcv`). Defaults to all kinds.
 - `:if_not_exists` — Emits `CREATE STATISTICS IF NOT EXISTS`.
 - `:target` — The object's statistics target (`ALTER STATISTICS ... SET STATISTICS`). Defaults to `default_statistics_target`.
+- `:analyze` — Set to `false` to skip the `ANALYZE` that follows. By default the table is analyzed right after the object is created, so the planner uses it before autovacuum next analyzes the table. The `ANALYZE` reads only the columns of the table's statistics objects, or the whole table when one of them has an expression.
 
 ### Statistics targets
 
@@ -66,7 +67,14 @@ set_index_statistics_target "index_addresses_on_lower_city", 1, 1000 # column by
 set_column_statistics_target :addresses, :city, nil
 ```
 
-These are not reversible, since the previous target is not recorded; use `up`/`down`. Explicit targets are dumped after the table:
+Given the previous target as `from:` and the new one as `to:`, they are reversible in `change`. Without `from:`, rolling back raises `ActiveRecord::IrreversibleMigration`:
+
+```ruby
+set_column_statistics_target :addresses, :city, from: nil, to: 1000
+set_index_statistics_target "index_addresses_on_lower_city", 1, from: nil, to: 1000
+```
+
+Explicit targets are dumped after the table:
 
 ```ruby
 create_statistics "addresses", ["city", "zip_code"], name: "addresses_city_zip_code_stat", target: 900
