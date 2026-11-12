@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1 (Unreleased)
+
+- Package every file world-readable. 0.2.0 shipped four files under `lib/` with mode 0640, so Ruby running as any user other than the one that installed the gem cannot load it. `rake build` and `rake release` now stop when a packaged file is not world-readable.
+
 ## 0.2.0 (2026-10-24)
 
 - Statistics targets: `create_statistics` takes `target:`, and `set_column_statistics_target` / `set_index_statistics_target` set column and expression-index targets. All three are read back by `statistics` / `statistics_targets` and dumped into `db/schema.rb` after each table.

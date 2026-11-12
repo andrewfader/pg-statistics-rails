@@ -16,3 +16,11 @@ task :coverage do
 end
 
 task default: :test
+
+desc "Fail when a packaged file is not world-readable"
+task :check_permissions do
+  unreadable = Bundler::GemHelper.gemspec.files.reject { |file| File.stat(file).mode.anybits?(0o004) }
+  abort "Not world-readable, run chmod a+r on: #{unreadable.join(" ")}" if unreadable.any?
+end
+
+Rake::Task[:build].enhance([:check_permissions])
