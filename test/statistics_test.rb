@@ -93,14 +93,33 @@ class PostgresqlStatisticsTest < Minitest::Test
     assert_equal ["city", "zip_code"], analyzed_columns
   end
 
-  def test_create_statistics_on_an_expression_builds_the_new_statistics
+  def test_create_statistics_on_an_expression_analyzes_only_the_plain_columns
     skip unless @connection.database_version >= 14_00_00
 
     insert_addresses
     @connection.create_statistics :addresses, [:city, "lower(email)"], name: "addresses_city_lower_email_stat"
 
     assert built?("addresses_city_lower_email_stat")
+    assert_equal ["city"], analyzed_columns
+  end
+
+  def test_create_statistics_of_only_expressions_analyzes_the_whole_table
+    skip unless @connection.database_version >= 14_00_00
+
+    insert_addresses
+    @connection.create_statistics :addresses, ["lower(email)", "upper(city)"], name: "addresses_lower_email_upper_city_stat"
+
+    assert built?("addresses_lower_email_upper_city_stat")
     assert_equal ["city", "email", "id", "zip_code"], analyzed_columns
+  end
+
+  def test_create_statistics_if_not_exists_leaves_an_existing_object_unanalyzed
+    @connection.create_statistics :addresses, [:city, :zip_code], name: "addresses_city_zip_code_stat", analyze: false
+    insert_addresses
+    @connection.create_statistics :addresses, [:city, :zip_code], name: "addresses_city_zip_code_stat", if_not_exists: true
+
+    refute built?("addresses_city_zip_code_stat")
+    assert_empty analyzed_columns
   end
 
   def test_create_statistics_keeps_the_other_statistics_on_the_table_built

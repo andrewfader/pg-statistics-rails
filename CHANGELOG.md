@@ -2,7 +2,7 @@
 
 ## 0.3.0 (Unreleased)
 
-- `create_statistics` analyzes the table right after creating the object, so the planner uses it before autovacuum next analyzes the table. The `ANALYZE` covers the columns of every statistics object on the table, or the whole table when one has an expression. `analyze: false` skips it. On PostgreSQL 18+ a partitioned table gets `ANALYZE ONLY`, leaving its partitions alone.
+- `create_statistics` analyzes the table right after creating the object, so the planner uses it before autovacuum next analyzes the table. The `ANALYZE` covers the plain columns of every statistics object on the table, which builds their expressions too, or the whole table when they have only expressions. `if_not_exists: true` skips it when the object already exists. `analyze: false` skips it. On PostgreSQL 18+ a partitioned table gets `ANALYZE ONLY`, leaving its partitions alone.
 - `set_column_statistics_target` and `set_index_statistics_target` take `from:` and `to:`, which makes them reversible in `change`. Given a bare target, rolling them back raises `ActiveRecord::IrreversibleMigration` instead of applying the target again. A `from:` without `to:`, or the reverse, raises `ArgumentError`.
 
 ## 0.2.1 (Unreleased)
