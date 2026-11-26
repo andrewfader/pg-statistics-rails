@@ -47,10 +47,16 @@ module PgStatisticsRails
     # :   The object's statistics target (`ALTER STATISTICS ... SET STATISTICS`).
     #     Defaults to the server's `default_statistics_target`.
     #
-    # Statistics are built by the next `ANALYZE` of the table.
+    # `:analyze`
+    # :   Set to `false` to leave building the statistics to the next `ANALYZE`
+    #     of the table. Defaults to `true`.
+    #
+    # Statistics are built by an `ANALYZE` of the table straight after, so the
+    # planner can use them before autovacuum next analyzes the table.
     def create_statistics(table_name, columns, **options)
       name = statistics_name(table_name, columns: columns, **options)
       kinds = Array(options[:kinds])
+      analyze = options[:analyze] != false && !(options[:if_not_exists] && statistics_exist?(name))
 
       sql = +"CREATE STATISTICS"
       sql << " IF NOT EXISTS" if options[:if_not_exists]
@@ -60,6 +66,7 @@ module PgStatisticsRails
 
       execute sql
       execute "ALTER STATISTICS #{quote_table_name(name)} SET STATISTICS #{Integer(options[:target])}" unless options[:target].nil?
+      analyze_statistics(table_name) if analyze
     end
 
     # Sets a column's statistics target, how much `ANALYZE` samples it. A nil
@@ -68,8 +75,14 @@ module PgStatisticsRails
     # ```
     # set_column_statistics_target :addresses, :city, 1000
     # ```
-    def set_column_statistics_target(table_name, column_name, target)
-      execute "ALTER TABLE #{quote_table_name(table_name)} ALTER COLUMN #{quote_column_name(column_name)} SET STATISTICS #{statistics_target_value(target)}"
+    #
+    # Passing the previous target as `:from` makes it reversible in `change`:
+    #
+    # ```
+    # set_column_statistics_target :addresses, :city, from: nil, to: 1000
+    # ```
+    def set_column_statistics_target(table_name, column_name, target_or_changes)
+      execute "ALTER TABLE #{quote_table_name(table_name)} ALTER COLUMN #{quote_column_name(column_name)} SET STATISTICS #{statistics_target_value(target_or_changes)}"
     end
 
     # Sets the statistics target of an expression index's column, by position
@@ -78,8 +91,10 @@ module PgStatisticsRails
     # ```
     # set_index_statistics_target "index_addresses_on_lower_city", 1, 1000
     # ```
-    def set_index_statistics_target(index_name, column_number, target)
-      execute "ALTER INDEX #{quote_table_name(index_name)} ALTER COLUMN #{Integer(column_number)} SET STATISTICS #{statistics_target_value(target)}"
+    #
+    # Like `set_column_statistics_target`, it takes `from:` and `to:`.
+    def set_index_statistics_target(index_name, column_number, target_or_changes)
+      execute "ALTER INDEX #{quote_table_name(index_name)} ALTER COLUMN #{Integer(column_number)} SET STATISTICS #{statistics_target_value(target_or_changes)}"
     end
 
     # Returns the explicit statistics targets on the given table's columns and
@@ -202,8 +217,45 @@ module PgStatisticsRails
         end
       end
 
-      def statistics_target_value(target)
-        target.nil? ? -1 : Integer(target)
+      def statistics_exist?(name)
+        schema, bare_name = extract_schema_qualified_name(name.to_s)
+        select_value(<<~SQL, "SCHEMA")
+          SELECT EXISTS (
+            SELECT 1 FROM pg_statistic_ext s
+            JOIN pg_namespace n ON n.oid = s.stxnamespace
+            WHERE s.stxname = #{quote(bare_name)} AND n.nspname = #{schema ? quote(schema) : 'current_schema()'}
+          )
+        SQL
+      end
+
+      def analyze_statistics(table_name)
+        columns = select_values(<<~SQL, "SCHEMA")
+          SELECT DISTINCT a.attname
+          FROM pg_statistic_ext s
+          JOIN pg_attribute a ON a.attrelid = s.stxrelid AND a.attnum = ANY (s.stxkeys)
+          WHERE s.stxrelid = #{quote(quote_table_name(table_name))}::regclass
+          ORDER BY a.attname
+        SQL
+
+        sql = +"ANALYZE"
+        sql << " ONLY" if database_version >= 18_00_00 && partitioned_table?(table_name)
+        sql << " #{quote_table_name(table_name)}"
+        sql << " (#{columns.map { |column| quote_column_name(column) }.join(', ')})" if columns.any?
+
+        execute sql
+      end
+
+      def partitioned_table?(table_name)
+        select_value("SELECT relkind FROM pg_class WHERE oid = #{quote(quote_table_name(table_name))}::regclass", "SCHEMA") == "p"
+      end
+
+      def statistics_target_value(target_or_changes)
+        if target_or_changes.is_a?(Hash)
+          raise ArgumentError, "Statistics target changes need both :from and :to" unless target_or_changes.key?(:from) && target_or_changes.key?(:to)
+
+          target_or_changes = target_or_changes[:to]
+        end
+        target_or_changes.nil? ? -1 : Integer(target_or_changes)
       end
 
       def fetch_statistics_by_schema(tables, &block)

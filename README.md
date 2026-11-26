@@ -53,6 +53,9 @@ Options:
 - `:kinds` — Array of kinds to build (`:ndistinct`, `:dependencies`, `:mcv`). Defaults to all kinds.
 - `:if_not_exists` — Emits `CREATE STATISTICS IF NOT EXISTS`.
 - `:target` — The object's statistics target (`ALTER STATISTICS ... SET STATISTICS`). Defaults to `default_statistics_target`.
+- `:analyze` — Set to `false` to skip the `ANALYZE` that follows. By default the table is analyzed right after the object is created, so the planner uses it before autovacuum next analyzes the table. The `ANALYZE` reads only the plain columns of the table's statistics objects, which also builds their expressions, or the whole table when they have only expressions. With `:if_not_exists`, an object that already exists is not analyzed again. On a partitioned table it runs `ANALYZE ONLY` on PostgreSQL 18+, so the partitions are not analyzed one by one.
+
+`ANALYZE` reads a sample of 300 × the largest statistics target rows, whatever the table's size: about 30,000 rows at the default target of 100, and up to 3,000,000 at 10,000. It holds a `SHARE UPDATE EXCLUSIVE` lock, the same lock `CREATE STATISTICS` takes, until the migration's transaction commits. Reads and writes go on, but autovacuum, other `ANALYZE` runs and most DDL on the table wait. On a large table with a high target, pass `analyze: false` and run `ANALYZE` outside the migration.
 
 ### Statistics targets
 
@@ -66,7 +69,14 @@ set_index_statistics_target "index_addresses_on_lower_city", 1, 1000 # column by
 set_column_statistics_target :addresses, :city, nil
 ```
 
-These are not reversible, since the previous target is not recorded; use `up`/`down`. Explicit targets are dumped after the table:
+Given the previous target as `from:` and the new one as `to:`, they are reversible in `change`. Without `from:`, rolling back raises `ActiveRecord::IrreversibleMigration`:
+
+```ruby
+set_column_statistics_target :addresses, :city, from: nil, to: 1000
+set_index_statistics_target "index_addresses_on_lower_city", 1, from: nil, to: 1000
+```
+
+Explicit targets are dumped after the table:
 
 ```ruby
 create_statistics "addresses", ["city", "zip_code"], name: "addresses_city_zip_code_stat", target: 900
