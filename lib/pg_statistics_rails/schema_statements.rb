@@ -218,15 +218,25 @@ module PgStatisticsRails
 
       def analyze_statistics(table_name)
         columns = statistics(table_name).flat_map(&:columns).uniq
-        sql = +"ANALYZE #{quote_table_name(table_name)}"
+        sql = +"ANALYZE"
+        sql << " ONLY" if database_version >= 18_00_00 && partitioned_table?(table_name)
+        sql << " #{quote_table_name(table_name)}"
         sql << " (#{columns.map { |column| quote_column_name(column) }.join(', ')})" if columns.all? { |column| column.match?(/\A\w+\z/) }
 
         execute sql
       end
 
+      def partitioned_table?(table_name)
+        select_value("SELECT relkind FROM pg_class WHERE oid = #{quote(quote_table_name(table_name))}::regclass", "SCHEMA") == "p"
+      end
+
       def statistics_target_value(target_or_changes)
-        target = target_or_changes.is_a?(Hash) && target_or_changes.key?(:from) && target_or_changes.key?(:to) ? target_or_changes[:to] : target_or_changes
-        target.nil? ? -1 : Integer(target)
+        if target_or_changes.is_a?(Hash)
+          raise ArgumentError, "Statistics target changes need both :from and :to" unless target_or_changes.key?(:from) && target_or_changes.key?(:to)
+
+          target_or_changes = target_or_changes[:to]
+        end
+        target_or_changes.nil? ? -1 : Integer(target_or_changes)
       end
 
       def fetch_statistics_by_schema(tables, &block)

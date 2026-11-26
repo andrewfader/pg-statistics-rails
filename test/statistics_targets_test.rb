@@ -67,6 +67,11 @@ class PostgresqlStatisticsTargetsTest < Minitest::Test
     assert_predicate @connection.statistics_targets("addresses"), :empty?
   end
 
+  def test_statistics_target_changes_need_both_from_and_to
+    assert_raises(ArgumentError) { @connection.set_column_statistics_target :addresses, :city, to: 700 }
+    assert_raises(ArgumentError) { @connection.set_index_statistics_target "index_addresses_on_lower_city", 1, from: nil }
+  end
+
   def test_statistics_targets_are_reversible_given_the_previous_targets
     @connection.set_column_statistics_target :addresses, :city, 300
 

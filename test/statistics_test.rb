@@ -122,6 +122,22 @@ class PostgresqlStatisticsTest < Minitest::Test
     refute built?("addresses_city_zip_code_stat")
   end
 
+  def test_create_statistics_on_a_partitioned_table_analyzes_only_the_parent
+    skip unless @connection.database_version >= 18_00_00
+
+    @connection.execute "CREATE TABLE readings (sensor int, region int, taken_on date) PARTITION BY RANGE (taken_on)"
+    @connection.execute "CREATE TABLE readings_2025 PARTITION OF readings FOR VALUES FROM ('2025-01-01') TO ('2026-01-01') WITH (autovacuum_enabled = false)"
+    @connection.execute "CREATE TABLE readings_2026 PARTITION OF readings FOR VALUES FROM ('2026-01-01') TO ('2027-01-01') WITH (autovacuum_enabled = false)"
+    @connection.execute "INSERT INTO readings SELECT i % 20, i % 4, date '2025-01-01' + i % 700 FROM generate_series(1, 1000) i"
+
+    @connection.create_statistics :readings, [:sensor, :region], name: "readings_sensor_region_stat"
+
+    assert built?("readings_sensor_region_stat")
+    assert_empty @connection.select_values("SELECT DISTINCT tablename FROM pg_stats WHERE tablename LIKE 'readings_%'")
+  ensure
+    @connection.drop_table :readings, if_exists: true
+  end
+
   def test_drop_statistics
     @connection.create_statistics :addresses, [:city, :zip_code], name: "addresses_city_zip_code_stat"
     @connection.drop_statistics :addresses, name: "addresses_city_zip_code_stat"

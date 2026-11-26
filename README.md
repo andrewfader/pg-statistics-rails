@@ -53,7 +53,9 @@ Options:
 - `:kinds` — Array of kinds to build (`:ndistinct`, `:dependencies`, `:mcv`). Defaults to all kinds.
 - `:if_not_exists` — Emits `CREATE STATISTICS IF NOT EXISTS`.
 - `:target` — The object's statistics target (`ALTER STATISTICS ... SET STATISTICS`). Defaults to `default_statistics_target`.
-- `:analyze` — Set to `false` to skip the `ANALYZE` that follows. By default the table is analyzed right after the object is created, so the planner uses it before autovacuum next analyzes the table. The `ANALYZE` reads only the columns of the table's statistics objects, or the whole table when one of them has an expression.
+- `:analyze` — Set to `false` to skip the `ANALYZE` that follows. By default the table is analyzed right after the object is created, so the planner uses it before autovacuum next analyzes the table. The `ANALYZE` reads only the columns of the table's statistics objects, or the whole table when one of them has an expression. On a partitioned table it runs `ANALYZE ONLY` on PostgreSQL 18+, so the partitions are not analyzed one by one.
+
+`ANALYZE` reads a sample of 300 × the largest statistics target rows, whatever the table's size: about 30,000 rows at the default target of 100, and up to 3,000,000 at 10,000. It holds a `SHARE UPDATE EXCLUSIVE` lock, the same lock `CREATE STATISTICS` takes, until the migration's transaction commits. Reads and writes go on, but autovacuum, other `ANALYZE` runs and most DDL on the table wait. On a large table with a high target, pass `analyze: false` and run `ANALYZE` outside the migration.
 
 ### Statistics targets
 
