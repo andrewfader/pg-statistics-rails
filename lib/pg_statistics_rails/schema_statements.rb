@@ -66,7 +66,28 @@ module PgStatisticsRails
 
       execute sql
       execute "ALTER STATISTICS #{quote_table_name(name)} SET STATISTICS #{Integer(options[:target])}" unless options[:target].nil?
-      analyze_statistics(table_name) if analyze
+      return unless analyze
+
+      if @statistics_tables_to_analyze
+        @statistics_tables_to_analyze << table_name.to_s
+      else
+        analyze_statistics(table_name)
+      end
+    end
+
+    # Runs the block, then analyzes each table that `create_statistics` was
+    # asked to analyze in it once. Every migration runs inside this.
+    def analyzing_statistics_once
+      return yield if @statistics_tables_to_analyze
+
+      begin
+        @statistics_tables_to_analyze = []
+        result = yield
+        @statistics_tables_to_analyze.uniq.each { |table_name| analyze_statistics(table_name) }
+        result
+      ensure
+        @statistics_tables_to_analyze = nil
+      end
     end
 
     # Sets a column's statistics target, how much `ANALYZE` samples it. A nil
@@ -232,10 +253,13 @@ module PgStatisticsRails
         columns = select_values(<<~SQL, "SCHEMA")
           SELECT DISTINCT a.attname
           FROM pg_statistic_ext s
-          JOIN pg_attribute a ON a.attrelid = s.stxrelid AND a.attnum = ANY (s.stxkeys)
-          WHERE s.stxrelid = #{quote(quote_table_name(table_name))}::regclass
+          LEFT JOIN pg_attribute a ON a.attrelid = s.stxrelid AND a.attnum = ANY (s.stxkeys)
+          WHERE s.stxrelid = to_regclass(#{quote(quote_table_name(table_name))})
           ORDER BY a.attname
         SQL
+        return if columns.empty?
+
+        columns.compact!
 
         sql = +"ANALYZE"
         sql << " ONLY" if database_version >= 18_00_00 && partitioned_table?(table_name)

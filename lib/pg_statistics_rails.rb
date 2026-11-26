@@ -6,10 +6,12 @@ require_relative "pg_statistics_rails/statistics_definition"
 require_relative "pg_statistics_rails/schema_statements"
 require_relative "pg_statistics_rails/schema_dumper"
 require_relative "pg_statistics_rails/command_recorder"
+require_relative "pg_statistics_rails/migration"
 
 ActiveSupport.on_load(:active_record) do
   require "active_record/migration/command_recorder"
   ActiveRecord::Migration::CommandRecorder.include(PgStatisticsRails::CommandRecorder)
+  ActiveRecord::Migration.prepend(PgStatisticsRails::Migration)
 end
 
 ActiveSupport.on_load(:active_record_postgresqladapter) do

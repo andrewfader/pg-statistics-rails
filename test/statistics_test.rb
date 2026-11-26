@@ -20,6 +20,27 @@ class PostgresqlStatisticsTest < Minitest::Test
     end
   end
 
+  class CreateTwoStatisticsMigration < SilentMigration
+    def change
+      create_statistics :addresses, [:city, :zip_code], name: "addresses_city_zip_code_stat"
+      create_statistics :addresses, [:city, :email], name: "addresses_city_email_stat"
+    end
+  end
+
+  class CreateStatisticsThenDropTableMigration < SilentMigration
+    def up
+      create_statistics :addresses, [:city, :zip_code], name: "addresses_city_zip_code_stat"
+      drop_table :addresses
+    end
+  end
+
+  class CreateThenDropStatisticsMigration < SilentMigration
+    def up
+      create_statistics :addresses, [:city, :zip_code], name: "addresses_city_zip_code_stat"
+      drop_statistics :addresses, name: "addresses_city_zip_code_stat"
+    end
+  end
+
   def setup
     @connection = ActiveRecord::Base.lease_connection
     @connection.create_table :addresses, force: true do |t|
@@ -157,6 +178,28 @@ class PostgresqlStatisticsTest < Minitest::Test
     @connection.drop_table :readings, if_exists: true
   end
 
+  def test_a_migration_analyzes_each_table_once_after_creating_its_statistics
+    insert_addresses
+    statements = analyze_statements { CreateTwoStatisticsMigration.new.migrate(:up) }
+
+    assert_equal 1, statements.size
+    assert built?("addresses_city_zip_code_stat")
+    assert built?("addresses_city_email_stat")
+  end
+
+  def test_a_migration_that_drops_the_table_skips_its_analyze
+    statements = analyze_statements { CreateStatisticsThenDropTableMigration.new.migrate(:up) }
+
+    assert_empty statements
+    refute @connection.table_exists?(:addresses)
+  end
+
+  def test_a_migration_that_drops_the_new_statistics_skips_the_analyze
+    statements = analyze_statements { CreateThenDropStatisticsMigration.new.migrate(:up) }
+
+    assert_empty statements
+  end
+
   def test_drop_statistics
     @connection.create_statistics :addresses, [:city, :zip_code], name: "addresses_city_zip_code_stat"
     @connection.drop_statistics :addresses, name: "addresses_city_zip_code_stat"
@@ -264,6 +307,13 @@ class PostgresqlStatisticsTest < Minitest::Test
         WHERE schemaname = current_schema() AND tablename = 'addresses'
         ORDER BY attname
       SQL
+    end
+
+    def analyze_statements(&block)
+      statements = []
+      subscriber = ->(*, payload) { statements << payload[:sql] if payload[:sql].start_with?("ANALYZE") }
+      ActiveSupport::Notifications.subscribed(subscriber, "sql.active_record", &block)
+      statements
     end
 
     def collect_notices

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1 (2026-11-26)
+
+- In a migration, `create_statistics` analyzes each table once, after the migration's last step, instead of after every call. A table or statistics object the migration drops is not analyzed.
+
 ## 0.3.0 (2026-11-26)
 
 - `create_statistics` analyzes the table right after creating the object, so the planner uses it before autovacuum next analyzes the table. The `ANALYZE` covers the plain columns of every statistics object on the table, which builds their expressions too, or the whole table when they have only expressions. `if_not_exists: true` skips it when the object already exists. `analyze: false` skips it. On PostgreSQL 18+ a partitioned table gets `ANALYZE ONLY`, leaving its partitions alone.
