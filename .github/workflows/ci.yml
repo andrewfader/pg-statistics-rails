@@ -16,11 +16,15 @@ concurrency:
 
 jobs:
   test:
-    name: Build & Test
+    name: Build & Test (PostgreSQL ${{ matrix.postgres }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: [16, 17, 18, 19]
     services:
       postgres:
-        image: postgres:19
+        image: postgres:${{ matrix.postgres }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -59,7 +63,7 @@ jobs:
             data = JSON.parse(File.read("coverage/coverage.json"))
             line = data.dig("total", "lines", "percent") || data.dig("metrics", "covered_percent")
             branch = data.dig("total", "branches", "percent") || data.dig("metrics", "branch_covered_percent")
-            summary = ["### Test Coverage", ""]
+            summary = ["### Test Coverage (PostgreSQL ${{ matrix.postgres }})", ""]
             summary << "- **Line coverage:** #{format("%.2f%%", line)}" if line
             summary << "- **Branch coverage:** #{format("%.2f%%", branch)}" if branch
             File.open(ENV.fetch("GITHUB_STEP_SUMMARY"), "a") { |f| f.puts(summary.join("\n")) }
@@ -69,6 +73,7 @@ jobs:
         run: bundle exec rake build
 
       - name: Upload built gem
+        if: matrix.postgres == 19
         uses: actions/upload-artifact@v7
         with:
           name: pg-statistics-rails-gem
@@ -79,7 +84,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-report
+          name: coverage-report-postgresql-${{ matrix.postgres }}
           path: coverage/
           if-no-files-found: ignore
 
@@ -87,5 +92,6 @@ jobs:
         uses: codecov/codecov-action@v7
         with:
           files: ./coverage/coverage.json
+          flags: postgresql-${{ matrix.postgres }}
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
